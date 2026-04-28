@@ -1,73 +1,142 @@
 {% extends "base.html" %}
 {% block title %}Сравнение — Wikidata Cars{% endblock %}
 {% block content %}
-<section class="compare">
-    <h1>Сравнение характеристик</h1>
-    {% if not models %}
-        <p class="hint">Ничего не выбрано. Вернись на <a href="/">поиск</a> и отметь нужные модели.</p>
-    {% else %}
-    <p class="hint">Сравниваемые QID: <code>{{ qids_raw }}</code>.
-    Ссылка на эту таблицу: <a href="/compare?qids={{ qids_raw }}">/compare?qids={{ qids_raw }}</a></p>
-    <div class="table-wrap">
-    <table class="cmp">
-        <thead>
-            <tr>
-                <th>Параметр</th>
-                {% for m in models %}
-                <th>{{ m.label or m.qid }}</th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% set rows = [
-                ('QID', 'qid'),
-                ('Производитель', 'manufacturer'),
-                ('Дизайн / inception', 'inception'),
-                ('Начало производства', 'production_start'),
-                ('Окончание производства', 'discontinued'),
-                ('Тип кузова', 'body_style'),
-                ('Масса, кг', 'mass_kg'),
-                ('Мощность, Вт', 'power_w'),
-                ('Длина, мм', 'length_mm'),
-                ('Ширина, мм', 'width_mm'),
-                ('Высота, мм', 'height_mm'),
-                ('Колёсная база, мм', 'wheelbase_mm'),
-                ('Объём двигателя, см³', 'engine_displacement_cc'),
-                ('Двигатель (powered by)', 'engine'),
-                ('Тип топлива', 'fuel_type'),
-                ('Привод', 'drive_type'),
-                ('Количество дверей', 'doors'),
-                ('Макс. скорость', 'max_speed'),
-                ('Всего произведено', 'total_produced'),
-                ('Изображение', 'image_url'),
-                ('Wikipedia', 'wikipedia_url'),
-                ('Обновлено', 'updated_at'),
-            ] %}
-            {% for title, key in rows %}
-            <tr>
-                <th>{{ title }}</th>
-                {% for m in models %}
-                    <td>
-                    {% set v = m.get(key) %}
-                    {% if key == 'qid' and v %}
-                        <a href="https://www.wikidata.org/wiki/{{ v }}" target="_blank" rel="noopener">{{ v }}</a>
-                    {% elif key == 'wikipedia_url' and v %}
-                        <a href="{{ v }}" target="_blank" rel="noopener">открыть</a>
-                    {% elif key == 'image_url' and v %}
-                        <a href="{{ v }}" target="_blank" rel="noopener"><img src="{{ v }}" alt="" style="max-height:80px;max-width:140px;"></a>
-                    {% elif v is none or v == '' %}
-                        <span class="muted">—</span>
-                    {% else %}
-                        {{ v }}
-                    {% endif %}
-                    </td>
-                {% endfor %}
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    <p><a href="/">← назад к поиску</a></p>
+<section class="compare-header">
+    <h1>Сравнение</h1>
+    {% if models %}
+    <span class="qids">{{ qids_raw }}</span>
     {% endif %}
 </section>
+
+{% if not models %}
+    <div class="list">
+        <div class="list-empty">Ничего не выбрано. Вернись на <a href="/">поиск</a> и отметь нужные модели.</div>
+    </div>
+{% else %}
+
+{# Macro: render a row of cells (one per model) for a given key & formatter. #}
+{% macro cells(key, models, fmt='', unit='') -%}
+    {% for m in models %}
+        {%- set v = m.get(key) -%}
+        <div class="cmp-cell{% if fmt == 'num' %} num{% endif %}">
+            {%- if v is none or v == '' or v == 0 -%}
+                <span class="muted">—</span>
+            {%- elif fmt == 'num' -%}
+                {{ '{:,.0f}'.format(v|float).replace(',', ' ') }}{% if unit %} <span class="muted">{{ unit }}</span>{% endif %}
+            {%- elif fmt == 'qid' -%}
+                <a href="https://www.wikidata.org/wiki/{{ v }}" target="_blank" rel="noopener">{{ v }}</a>
+            {%- elif fmt == 'wp' -%}
+                <a href="{{ v }}" target="_blank" rel="noopener">открыть</a>
+            {%- elif fmt == 'date' -%}
+                {{ v[:10] if v|length >= 10 else v }}
+            {%- else -%}
+                {{ v }}
+            {%- endif -%}
+        </div>
+    {% endfor %}
+{%- endmacro %}
+
+<div class="cmp-card" style="--cols: {{ models|length }};">
+    <div class="cmp-card-header" style="--cols: {{ models|length }};">
+        <div class="col row-title">
+            <div class="name">&nbsp;</div>
+            <div class="sub">&nbsp;</div>
+        </div>
+        {% for m in models %}
+        <div class="col">
+            {% if m.image_url %}
+                <a href="{{ m.image_url }}" target="_blank" rel="noopener"><img src="{{ m.image_url }}" alt=""></a>
+            {% endif %}
+            <div class="name">{{ m.label or m.qid }}</div>
+            <div class="sub">{{ m.manufacturer or '' }}</div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="cmp-table" style="--cols: {{ models|length }};">
+
+        <div class="cmp-section">Габариты</div>
+
+        <div class="cmp-row-label">Длина</div>
+        {{ cells('length_mm', models, 'num', 'мм') }}
+
+        <div class="cmp-row-label">Ширина</div>
+        {{ cells('width_mm', models, 'num', 'мм') }}
+
+        <div class="cmp-row-label">Высота</div>
+        {{ cells('height_mm', models, 'num', 'мм') }}
+
+        <div class="cmp-row-label">Колёсная база</div>
+        {{ cells('wheelbase_mm', models, 'num', 'мм') }}
+
+        <div class="cmp-row-label">Снаряжённая масса</div>
+        {{ cells('mass_kg', models, 'num', 'кг') }}
+
+        <div class="cmp-section">Двигатель и привод</div>
+
+        <div class="cmp-row-label">Двигатель</div>
+        {{ cells('engine', models) }}
+
+        <div class="cmp-row-label">Объём двигателя</div>
+        {{ cells('engine_displacement_cc', models, 'num', 'см³') }}
+
+        <div class="cmp-row-label">Мощность</div>
+        {{ cells('power_w', models, 'num', 'Вт') }}
+
+        <div class="cmp-row-label">Топливо</div>
+        {{ cells('fuel_type', models) }}
+
+        <div class="cmp-row-label">Привод</div>
+        {{ cells('drive_type', models) }}
+
+        <div class="cmp-row-label">Трансмиссия</div>
+        {{ cells('transmission', models) }}
+
+        <div class="cmp-row-label">Макс. скорость</div>
+        {{ cells('max_speed', models, 'num', 'км/ч') }}
+
+        <div class="cmp-section">Кузов</div>
+
+        <div class="cmp-row-label">Тип кузова</div>
+        {{ cells('body_style', models) }}
+
+        <div class="cmp-row-label">Количество дверей</div>
+        {{ cells('doors', models, 'num') }}
+
+        <div class="cmp-section">Производство</div>
+
+        <div class="cmp-row-label">Создано (модель)</div>
+        {{ cells('inception', models, 'date') }}
+
+        <div class="cmp-row-label">Начало производства</div>
+        {{ cells('production_start', models, 'date') }}
+
+        <div class="cmp-row-label">Период производства</div>
+        {{ cells('production_period', models) }}
+
+        <div class="cmp-row-label">Снято с производства</div>
+        {{ cells('discontinued', models, 'date') }}
+
+        <div class="cmp-row-label">Всего произведено</div>
+        {{ cells('total_produced', models, 'num') }}
+
+        <div class="cmp-section">Источники</div>
+
+        <div class="cmp-row-label">Производитель</div>
+        {{ cells('manufacturer', models) }}
+
+        <div class="cmp-row-label">Wikidata QID</div>
+        {{ cells('qid', models, 'qid') }}
+
+        <div class="cmp-row-label">Wikipedia</div>
+        {{ cells('wikipedia_url', models, 'wp') }}
+
+        <div class="cmp-row-label">Обновлено</div>
+        {{ cells('updated_at', models, 'date') }}
+
+    </div>
+</div>
+
+<p style="margin-top:18px;"><a href="/">← к поиску</a></p>
+{% endif %}
 {% endblock %}

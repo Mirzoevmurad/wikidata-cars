@@ -3,3 +3,5 @@ uvicorn[standard]>=0.27
 jinja2>=3.1
 requests>=2.31
 tqdm>=4.66
+beautifulsoup4>=4.12
+lxml>=5.1

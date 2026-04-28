@@ -2,13 +2,16 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>{% block title %}Wikidata Cars{% endblock %}</title>
     <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
     <header class="topbar">
-        <a href="/" class="brand">🚗 Wikidata Cars</a>
+        <a href="/" class="brand">Cars</a>
         <nav>
             <a href="/">Поиск</a>
             <a href="/compare">Сравнение</a>
@@ -18,7 +21,7 @@
     </header>
     <main>{% block content %}{% endblock %}</main>
     <footer>
-        <span>Источник: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a></span>
+        <span>Источники: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a> + Wikipedia infoboxes</span>
         {% if meta and meta.last_updated_utc %}
         <span>· обновлено: {{ meta.last_updated_utc }} UTC</span>
         {% endif %}

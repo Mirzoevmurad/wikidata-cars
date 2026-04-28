@@ -1,106 +1,129 @@
 {% extends "base.html" %}
 {% block title %}Поиск — Wikidata Cars{% endblock %}
 {% block content %}
-<section class="search">
-    <h1>Поиск модели</h1>
-    <p class="hint">Начни вводить название (например, <em>BMW X5</em>, <em>Lada Niva</em>, <em>Tesla</em>).
-    Отметь галочками до 10 моделей и нажми «Сравнить».</p>
-    <input id="q" type="search" placeholder="Название модели или производитель…" autocomplete="off" autofocus>
-    <div id="status" class="status"></div>
-    <form id="cmp-form" action="/compare" method="get">
-        <table id="results">
-            <thead>
-                <tr>
-                    <th></th>
-                    <th>Модель</th>
-                    <th>Производитель</th>
-                    <th>Начало выпуска</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-        <input type="hidden" name="qids" id="qids">
-        <div class="actions">
-            <button type="submit" id="cmp-btn" disabled>Сравнить выбранные</button>
-            <span id="selection-count" class="muted"></span>
-        </div>
-    </form>
+<section class="large-title">
+    <h1>Поиск автомобилей</h1>
+    <p>Введи название модели или производителя. Отметь до 10 моделей и нажми «Сравнить».</p>
 </section>
+
+<form id="cmp-form" action="/compare" method="get">
+    <div class="search-field">
+        <input id="q" type="search" placeholder="BMW X5, Lada Niva, Tesla…" autocomplete="off" autofocus>
+    </div>
+    <div id="status" class="status"></div>
+
+    <div class="list" id="results"></div>
+
+    <input type="hidden" name="qids" id="qids">
+    <div class="action-bar">
+        <span class="selection-count" id="selection-count">ничего не выбрано</span>
+        <span class="grow"></span>
+        <button type="submit" id="cmp-btn" class="btn btn-primary" disabled>Сравнить</button>
+    </div>
+</form>
 
 <script>
 const qInput = document.getElementById('q');
-const tbody = document.querySelector('#results tbody');
+const list = document.getElementById('results');
 const statusEl = document.getElementById('status');
 const cmpBtn = document.getElementById('cmp-btn');
 const selCount = document.getElementById('selection-count');
 const qidsField = document.getElementById('qids');
-const cmpForm = document.getElementById('cmp-form');
 
-const selected = new Map();  // qid -> label
+const selected = new Map();   // qid -> label
+
+function escHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    }[c]));
+}
+
+function renderRow(r) {
+    const checked = selected.has(r.qid);
+    const inception = r.inception ? r.inception.slice(0, 4) : '';
+    const sub = [r.manufacturer, inception].filter(Boolean).join(' · ');
+    const row = document.createElement('label');
+    row.className = 'list-row' + (checked ? ' is-checked' : '');
+    row.innerHTML = `
+      <span class="check">
+        <input type="checkbox" data-qid="${escHtml(r.qid)}" data-label="${escHtml(r.label||'')}" ${checked?'checked':''}>
+      </span>
+      <span class="text">
+        <span class="title">${escHtml(r.label || r.qid)}</span>
+        <span class="meta">${escHtml(sub) || '<span class="muted">—</span>'}</span>
+      </span>
+      <span class="chev"><a href="/compare?qids=${encodeURIComponent(r.qid)}">Подробно</a></span>
+    `;
+    return row;
+}
 
 function render(results) {
-    tbody.innerHTML = '';
-    results.forEach(r => {
-        const tr = document.createElement('tr');
-        const checked = selected.has(r.qid) ? 'checked' : '';
-        const inception = r.inception ? r.inception.slice(0, 10) : '';
-        tr.innerHTML = `
-          <td><input type="checkbox" data-qid="${r.qid}" data-label="${(r.label||'').replace(/"/g,'&quot;')}" ${checked}></td>
-          <td>${r.label || r.qid}</td>
-          <td>${r.manufacturer || ''}</td>
-          <td>${inception}</td>
-          <td><a href="/compare?qids=${r.qid}">Подробно</a></td>
-        `;
-        tbody.appendChild(tr);
-    });
+    list.innerHTML = '';
+    if (!results.length) {
+        const empty = document.createElement('div');
+        empty.className = 'list-empty';
+        empty.textContent = 'Ничего не нашлось. Попробуй другое название.';
+        list.appendChild(empty);
+        return;
+    }
+    const frag = document.createDocumentFragment();
+    results.forEach(r => frag.appendChild(renderRow(r)));
+    list.appendChild(frag);
 }
 
 function updateSelection() {
     const ids = [...selected.keys()];
     qidsField.value = ids.join(',');
     cmpBtn.disabled = ids.length === 0;
-    selCount.textContent = ids.length ? `выбрано: ${ids.length}` : '';
+    if (ids.length === 0) {
+        selCount.textContent = 'ничего не выбрано';
+    } else if (ids.length === 1) {
+        selCount.textContent = 'выбрана 1 модель';
+    } else {
+        selCount.textContent = `выбрано: ${ids.length}`;
+    }
 }
 
-tbody.addEventListener('change', (e) => {
-    if (e.target.matches('input[type=checkbox][data-qid]')) {
-        const qid = e.target.dataset.qid;
-        if (e.target.checked) {
-            if (selected.size >= 10) {
-                e.target.checked = false;
-                alert('Можно выбрать не более 10 моделей');
-                return;
-            }
-            selected.set(qid, e.target.dataset.label);
-        } else {
-            selected.delete(qid);
+list.addEventListener('change', (e) => {
+    if (!e.target.matches('input[type=checkbox][data-qid]')) return;
+    const qid = e.target.dataset.qid;
+    const row = e.target.closest('.list-row');
+    if (e.target.checked) {
+        if (selected.size >= 10) {
+            e.target.checked = false;
+            alert('Можно выбрать не более 10 моделей');
+            return;
         }
-        updateSelection();
+        selected.set(qid, e.target.dataset.label);
+        row.classList.add('is-checked');
+    } else {
+        selected.delete(qid);
+        row.classList.remove('is-checked');
     }
+    updateSelection();
 });
 
 let t = null;
 async function search() {
     const q = qInput.value.trim();
-    statusEl.textContent = 'Ищу…';
+    statusEl.textContent = q ? 'Ищу…' : 'Топ моделей по алфавиту';
     try {
         const url = new URL('/api/search', location.origin);
         url.searchParams.set('q', q);
-        url.searchParams.set('limit', '50');
+        url.searchParams.set('limit', '60');
         const r = await fetch(url);
         const data = await r.json();
-        statusEl.textContent = `найдено: ${data.count}`;
+        statusEl.textContent = data.count ? `найдено: ${data.count}` : '';
         render(data.results);
     } catch (err) {
         statusEl.textContent = 'ошибка: ' + err.message;
     }
 }
-
 qInput.addEventListener('input', () => {
     clearTimeout(t);
     t = setTimeout(search, 180);
 });
 search();
+updateSelection();
 </script>
 {% endblock %}
