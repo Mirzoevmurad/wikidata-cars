@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Сравнение — Wikidata Cars{% endblock %}
+{% block content %}
+<section class="compare">
+    <h1>Сравнение характеристик</h1>
+    {% if not models %}
+        <p class="hint">Ничего не выбрано. Вернись на <a href="/">поиск</a> и отметь нужные модели.</p>
+    {% else %}
+    <p class="hint">Сравниваемые QID: <code>{{ qids_raw }}</code>.
+    Ссылка на эту таблицу: <a href="/compare?qids={{ qids_raw }}">/compare?qids={{ qids_raw }}</a></p>
+    <div class="table-wrap">
+    <table class="cmp">
+        <thead>
+            <tr>
+                <th>Параметр</th>
+                {% for m in models %}
+                <th>{{ m.label or m.qid }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% set rows = [
+                ('QID', 'qid'),
+                ('Производитель', 'manufacturer'),
+                ('Дизайн / inception', 'inception'),
+                ('Начало производства', 'production_start'),
+                ('Окончание производства', 'discontinued'),
+                ('Тип кузова', 'body_style'),
+                ('Масса, кг', 'mass_kg'),
+                ('Мощность, Вт', 'power_w'),
+                ('Длина, мм', 'length_mm'),
+                ('Ширина, мм', 'width_mm'),
+                ('Высота, мм', 'height_mm'),
+                ('Колёсная база, мм', 'wheelbase_mm'),
+                ('Объём двигателя, см³', 'engine_displacement_cc'),
+                ('Двигатель (powered by)', 'engine'),
+                ('Тип топлива', 'fuel_type'),
+                ('Привод', 'drive_type'),
+                ('Количество дверей', 'doors'),
+                ('Макс. скорость', 'max_speed'),
+                ('Всего произведено', 'total_produced'),
+                ('Изображение', 'image_url'),
+                ('Wikipedia', 'wikipedia_url'),
+                ('Обновлено', 'updated_at'),
+            ] %}
+            {% for title, key in rows %}
+            <tr>
+                <th>{{ title }}</th>
+                {% for m in models %}
+                    <td>
+                    {% set v = m.get(key) %}
+                    {% if key == 'qid' and v %}
+                        <a href="https://www.wikidata.org/wiki/{{ v }}" target="_blank" rel="noopener">{{ v }}</a>
+                    {% elif key == 'wikipedia_url' and v %}
+                        <a href="{{ v }}" target="_blank" rel="noopener">открыть</a>
+                    {% elif key == 'image_url' and v %}
+                        <a href="{{ v }}" target="_blank" rel="noopener"><img src="{{ v }}" alt="" style="max-height:80px;max-width:140px;"></a>
+                    {% elif v is none or v == '' %}
+                        <span class="muted">—</span>
+                    {% else %}
+                        {{ v }}
+                    {% endif %}
+                    </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p><a href="/">← назад к поиску</a></p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# data artifacts
+data/
+*.db
+*.sqlite
+*.sqlite3
+wikidata_cars.csv
+wikidata_cars.xlsx
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
