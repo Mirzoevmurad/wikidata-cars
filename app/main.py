@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -41,13 +42,42 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return out
 
 
+_CORP_SUFFIX_RE = re.compile(
+    r"[,]?\s*"
+    r"(?:motor company|motor corporation|motor corp|motors|motor|"
+    r"corporation|company|holdings|holding|group|automobile|automotive|"
+    r"vehicles|cars|inc|incorporated|llc|ltd|limited|plc|corp|co|"
+    r"ag|gmbh|kg|sa|s\.p\.a|s\.r\.l|n\.v|b\.v|kk|jsc|ojsc|pao|oao|ooo)"
+    r"\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _brand_short(manufacturer: str) -> str:
+    """Strip trailing legal/corporate suffixes from a manufacturer name.
+
+    'Tesla, Inc.' -> 'Tesla', 'Toyota Motor Corporation' -> 'Toyota',
+    'BMW AG' -> 'BMW', 'Audi' -> 'Audi'.
+    """
+    name = (manufacturer or "").strip()
+    if not name:
+        return ""
+    while True:
+        new = _CORP_SUFFIX_RE.sub("", name).strip(" ,.")
+        if new == name or not new:
+            break
+        name = new
+    return name
+
+
 def _display_name(label: str | None, manufacturer: str | None) -> str:
     """Return '<Brand> <Model>' for the UI.
 
-    Most Wikidata labels already start with the brand (e.g. 'Tesla Model X')
-    so we leave those untouched. Rows added by drom.ru / auto.ru / auto-data
-    only store the model in `label` (e.g. 'A1', 'Camry'); for those we prepend
-    the manufacturer.
+    Wikidata labels often already include the brand (e.g. 'Tesla Model X')
+    while drom.ru / auto.ru / auto-data rows store only the model in `label`
+    (e.g. 'A1', 'Camry'). We compare the label against a short form of the
+    manufacturer (without ', Inc.', 'Motor Corporation', 'AG' …) and prepend
+    that short form when the label doesn't already start with it.
     """
     label = (label or "").strip()
     manuf = (manufacturer or "").strip()
@@ -55,9 +85,11 @@ def _display_name(label: str | None, manufacturer: str | None) -> str:
         return manuf
     if not manuf:
         return label
-    if label.lower().startswith(manuf.lower()):
+    brand = _brand_short(manuf) or manuf
+    low_label = label.lower()
+    if low_label.startswith(brand.lower()) or low_label.startswith(manuf.lower()):
         return label
-    return f"{manuf} {label}"
+    return f"{brand} {label}"
 
 
 def _meta(conn: sqlite3.Connection) -> dict[str, str]:
