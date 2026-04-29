@@ -977,6 +977,18 @@ def main() -> int:
         action="store_true",
         help="run auto-data.net crawl after Wikipedia enrichment",
     )
+    ap.add_argument(
+        "--drom",
+        action="store_true",
+        help="run drom.ru catalog crawl after Wikipedia enrichment",
+    )
+    ap.add_argument(
+        "--autoru",
+        action="store_true",
+        help="run auto.ru catalog crawl after Wikipedia enrichment "
+             "(needs a Russian IP / proxy \u2014 from outside RU you will "
+             "hit Yandex SmartCaptcha and get zero rows).",
+    )
     args = ap.parse_args()
 
     db_path = Path(args.db)
@@ -1024,7 +1036,7 @@ def main() -> int:
         rebuild_fts(conn)
 
     if args.autodata:
-        log.info("5/5 enriching from auto-data.net...")
+        log.info("5/N enriching from auto-data.net...")
         try:
             from enrich_autodata import crawl as _autodata_crawl
 
@@ -1032,6 +1044,26 @@ def main() -> int:
             rebuild_fts(conn)
         except Exception as e:  # pragma: no cover
             log.warning("auto-data.net pass failed: %r", e)
+
+    if args.drom:
+        log.info("6/N enriching from drom.ru...")
+        try:
+            from enrich_drom import crawl as _drom_crawl
+
+            _drom_crawl(db_path, brand_limit=0, model_limit=0)
+            rebuild_fts(conn)
+        except Exception as e:  # pragma: no cover
+            log.warning("drom.ru pass failed: %r", e)
+
+    if args.autoru:
+        log.info("7/N enriching from auto.ru...")
+        try:
+            from enrich_autoru import crawl as _autoru_crawl
+
+            _autoru_crawl(db_path, brand_limit=0, model_limit=0)
+            rebuild_fts(conn)
+        except Exception as e:  # pragma: no cover
+            log.warning("auto.ru pass failed: %r", e)
 
     set_meta(
         conn,
