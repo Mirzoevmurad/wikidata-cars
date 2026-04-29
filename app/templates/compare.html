@@ -47,7 +47,7 @@
             {% if m.image_url %}
                 <a href="{{ m.image_url }}" target="_blank" rel="noopener"><img src="{{ m.image_url }}" alt=""></a>
             {% endif %}
-            <div class="name">{{ m.label or m.qid }}</div>
+            <div class="name">{{ m.display_name or m.label or m.qid }}</div>
             <div class="sub">{{ m.manufacturer or '' }}</div>
         </div>
         {% endfor %}

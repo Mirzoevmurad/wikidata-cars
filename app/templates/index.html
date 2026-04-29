@@ -41,15 +41,18 @@ function escHtml(s) {
 function renderRow(r) {
     const checked = selected.has(r.qid);
     const inception = r.inception ? r.inception.slice(0, 4) : '';
+    // Some rows store only the model in `label` (drom.ru / auto.ru imports),
+    // others already include the brand. Show "<Brand> <Model>" consistently.
+    const display = r.display_name || r.label || r.qid;
     const sub = [r.manufacturer, inception].filter(Boolean).join(' · ');
     const row = document.createElement('label');
     row.className = 'list-row' + (checked ? ' is-checked' : '');
     row.innerHTML = `
       <span class="check">
-        <input type="checkbox" data-qid="${escHtml(r.qid)}" data-label="${escHtml(r.label||'')}" ${checked?'checked':''}>
+        <input type="checkbox" data-qid="${escHtml(r.qid)}" data-label="${escHtml(display)}" ${checked?'checked':''}>
       </span>
       <span class="text">
-        <span class="title">${escHtml(r.label || r.qid)}</span>
+        <span class="title">${escHtml(display)}</span>
         <span class="meta">${escHtml(sub) || '<span class="muted">—</span>'}</span>
       </span>
       <span class="chev"><a href="/compare?qids=${encodeURIComponent(r.qid)}">Подробно</a></span>

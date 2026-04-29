@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,61 @@ def get_conn() -> sqlite3.Connection:
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    return {k: row[k] for k in row.keys()}
+    out = {k: row[k] for k in row.keys()}
+    out["display_name"] = _display_name(out.get("label"), out.get("manufacturer"))
+    return out
+
+
+_CORP_SUFFIX_RE = re.compile(
+    # Require an actual separator (',' or whitespace) before the suffix so
+    # 'Iveco' isn't trimmed to 'Ive' (the trailing 'co' would otherwise match).
+    r"(?:[,]\s*|\s+)"
+    r"(?:motor company|motor corporation|motor corp|motors|motor|"
+    r"corporation|company|holdings|holding|group|automobile|automotive|"
+    r"vehicles|cars|inc|incorporated|llc|ltd|limited|plc|corp|co|"
+    r"ag|gmbh|kg|sa|s\.p\.a|s\.r\.l|n\.v|b\.v|kk|jsc|ojsc|pao|oao|ooo)"
+    r"\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _brand_short(manufacturer: str) -> str:
+    """Strip trailing legal/corporate suffixes from a manufacturer name.
+
+    'Tesla, Inc.' -> 'Tesla', 'Toyota Motor Corporation' -> 'Toyota',
+    'BMW AG' -> 'BMW', 'Audi' -> 'Audi'.
+    """
+    name = (manufacturer or "").strip()
+    if not name:
+        return ""
+    while True:
+        new = _CORP_SUFFIX_RE.sub("", name).strip(" ,.")
+        if new == name or not new:
+            break
+        name = new
+    return name
+
+
+def _display_name(label: str | None, manufacturer: str | None) -> str:
+    """Return '<Brand> <Model>' for the UI.
+
+    Wikidata labels often already include the brand (e.g. 'Tesla Model X')
+    while drom.ru / auto.ru / auto-data rows store only the model in `label`
+    (e.g. 'A1', 'Camry'). We compare the label against a short form of the
+    manufacturer (without ', Inc.', 'Motor Corporation', 'AG' …) and prepend
+    that short form when the label doesn't already start with it.
+    """
+    label = (label or "").strip()
+    manuf = (manufacturer or "").strip()
+    if not label:
+        return manuf
+    if not manuf:
+        return label
+    brand = _brand_short(manuf) or manuf
+    low_label = label.lower()
+    if low_label.startswith(brand.lower()) or low_label.startswith(manuf.lower()):
+        return label
+    return f"{brand} {label}"
 
 
 def _meta(conn: sqlite3.Connection) -> dict[str, str]:
@@ -218,7 +273,10 @@ def compare_page(request: Request, qids: str = "") -> HTMLResponse:
                 f"SELECT * FROM cars WHERE qid IN ({placeholders})", ids
             ).fetchall()
             by_qid = {r["qid"]: _row_to_dict(r) for r in rows}
-            models = [by_qid.get(q, {"qid": q, "label": "(not found)"}) for q in ids]
+            models = [
+                by_qid.get(q, {"qid": q, "label": "(not found)", "display_name": "(not found)"})
+                for q in ids
+            ]
         finally:
             conn.close()
     return templates.TemplateResponse(
