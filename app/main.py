@@ -36,7 +36,28 @@ def get_conn() -> sqlite3.Connection:
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    return {k: row[k] for k in row.keys()}
+    out = {k: row[k] for k in row.keys()}
+    out["display_name"] = _display_name(out.get("label"), out.get("manufacturer"))
+    return out
+
+
+def _display_name(label: str | None, manufacturer: str | None) -> str:
+    """Return '<Brand> <Model>' for the UI.
+
+    Most Wikidata labels already start with the brand (e.g. 'Tesla Model X')
+    so we leave those untouched. Rows added by drom.ru / auto.ru / auto-data
+    only store the model in `label` (e.g. 'A1', 'Camry'); for those we prepend
+    the manufacturer.
+    """
+    label = (label or "").strip()
+    manuf = (manufacturer or "").strip()
+    if not label:
+        return manuf
+    if not manuf:
+        return label
+    if label.lower().startswith(manuf.lower()):
+        return label
+    return f"{manuf} {label}"
 
 
 def _meta(conn: sqlite3.Connection) -> dict[str, str]:
@@ -218,7 +239,10 @@ def compare_page(request: Request, qids: str = "") -> HTMLResponse:
                 f"SELECT * FROM cars WHERE qid IN ({placeholders})", ids
             ).fetchall()
             by_qid = {r["qid"]: _row_to_dict(r) for r in rows}
-            models = [by_qid.get(q, {"qid": q, "label": "(not found)"}) for q in ids]
+            models = [
+                by_qid.get(q, {"qid": q, "label": "(not found)", "display_name": "(not found)"})
+                for q in ids
+            ]
         finally:
             conn.close()
     return templates.TemplateResponse(
