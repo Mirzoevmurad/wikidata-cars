@@ -117,6 +117,50 @@ def _escape_fts(query: str) -> str:
     return " ".join(f'"{t}"*' for t in tokens)
 
 
+# ЙЦУКЕН → QWERTY: keys at the same physical position on a Russian keyboard.
+# Used for typo-tolerant search: typing 'лшф кшщ' (the keys you'd hit if your
+# layout were stuck on Russian while you tried to type 'kia rio') still finds
+# 'Kia Rio'. Letters only — search shouldn't care about punctuation.
+_RU_EN_PAIRS = (
+    ("а", "f"), ("б", ","), ("в", "d"), ("г", "u"), ("д", "l"),
+    ("е", "t"), ("ё", "`"), ("ж", ";"), ("з", "p"), ("и", "b"),
+    ("й", "q"), ("к", "r"), ("л", "k"), ("м", "v"), ("н", "y"),
+    ("о", "j"), ("п", "g"), ("р", "h"), ("с", "c"), ("т", "n"),
+    ("у", "e"), ("ф", "a"), ("х", "["), ("ц", "w"), ("ч", "x"),
+    ("ш", "i"), ("щ", "o"), ("ъ", "]"), ("ы", "s"), ("ь", "m"),
+    ("э", "'"), ("ю", "."), ("я", "z"),
+)
+_RU_TO_EN = {ord(ru): en for ru, en in _RU_EN_PAIRS}
+_RU_TO_EN.update({ord(ru.upper()): en.upper() for ru, en in _RU_EN_PAIRS if ru.isalpha()})
+_EN_TO_RU = {ord(en): ru for ru, en in _RU_EN_PAIRS}
+_EN_TO_RU.update({ord(en.upper()): ru.upper() for ru, en in _RU_EN_PAIRS if en.isalpha()})
+
+
+def _swap_layout(text: str) -> str:
+    """Return `text` with each char remapped between RU↔EN keyboard layouts.
+
+    If the input contains both alphabets we still translate each character
+    individually — the result is a best-effort that lets FTS pick up matches
+    when the user typed in the wrong layout.
+    """
+    if not text:
+        return ""
+    has_cyr = any("\u0400" <= ch <= "\u04ff" for ch in text)
+    return text.translate(_RU_TO_EN if has_cyr else _EN_TO_RU)
+
+
+def _build_fts_query(query: str) -> str:
+    """Build an FTS5 MATCH expression for `query`, OR-ing in a layout-swapped
+    variant so users with the wrong keyboard layout still get hits."""
+    primary = _escape_fts(query)
+    swapped_text = _swap_layout(query)
+    if swapped_text and swapped_text != query:
+        secondary = _escape_fts(swapped_text)
+        if secondary and secondary != primary:
+            return f"({primary}) OR ({secondary})"
+    return primary
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> HTMLResponse:
     conn = get_conn()
@@ -144,7 +188,7 @@ def api_search(
                 (limit,),
             ).fetchall()
         else:
-            fts_query = _escape_fts(q)
+            fts_query = _build_fts_query(q)
             if fts_query:
                 rows = conn.execute(
                     """
@@ -159,16 +203,26 @@ def api_search(
                 ).fetchall()
             else:
                 rows = []
-            # fallback LIKE if FTS returned nothing
+            # fallback LIKE if FTS returned nothing — also try a layout-swapped
+            # version of the query so 'лшф кшщ' falls back to 'kia rio'.
             if not rows:
-                like = f"%{q}%"
+                candidates = {q}
+                swapped = _swap_layout(q)
+                if swapped and swapped != q:
+                    candidates.add(swapped)
+                clauses, params = [], []
+                for c in candidates:
+                    like = f"%{c}%"
+                    clauses.append("(label LIKE ? OR manufacturer LIKE ?)")
+                    params.extend([like, like])
+                params.append(limit)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT qid, label, manufacturer, inception FROM cars
-                    WHERE label LIKE ? OR manufacturer LIKE ?
+                    WHERE {' OR '.join(clauses)}
                     ORDER BY label LIMIT ?
                     """,
-                    (like, like, limit),
+                    params,
                 ).fetchall()
         return {"query": q, "count": len(rows), "results": [_row_to_dict(r) for r in rows]}
     finally:
