@@ -105,7 +105,10 @@ User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 Environment=PYTHONUNBUFFERED=1
-ExecStart=${APP_DIR}/.venv/bin/python ${APP_DIR}/scraper.py --db ${APP_DIR}/data/cars.db
+ExecStart=${APP_DIR}/.venv/bin/python ${APP_DIR}/scraper.py \\
+    --db ${APP_DIR}/data/cars.db \\
+    --find-missing-wp \\
+    --autodata
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=6h
