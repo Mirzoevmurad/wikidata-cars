@@ -531,6 +531,76 @@ def _first_match(rx: re.Pattern, text: str, conv) -> float | None:
         return None
 
 
+_BODY_DOORS_RE = re.compile(r"(\d+)\s*[-\u2013]?\s*door", re.IGNORECASE)
+_FUEL_GUESS = re.compile(
+    r"\b(petrol|gasoline|diesel|hybrid|electric|hydrogen|ethanol|cng|lpg|lng|"
+    r"\u0431\u0435\u043d\u0437\u0438\u043d|\u0434\u0438\u0437\u0435\u043b\u044c|"
+    r"\u044d\u043b\u0435\u043a\u0442\u0440(?:\u043e|\u0438\u0447\u0435\u0441))\b",
+    re.IGNORECASE,
+)
+
+
+def _bare_kg(text: str) -> float | None:
+    """Russian/German infoboxes often list mass without a unit; assume kg.
+
+    Only used when the matched header is clearly mass-related. Picks the
+    smallest plausible kg-range number to bias toward the lightest variant.
+    """
+    candidates = []
+    for m in re.finditer(r"(\d{3,5}(?:[.,]\d+)?)", text.replace("\xa0", " ")):
+        try:
+            n = float(m.group(1).replace(",", "."))
+        except ValueError:
+            continue
+        if 100 < n < 50000:
+            candidates.append(n)
+    return min(candidates) if candidates else None
+
+
+def _smallest_displacement(text: str) -> float | None:
+    """Find the smallest displacement value in an Engine/Powertrain cell.
+
+    Wikipedia infoboxes list engine variants like
+    ``1.2\u00a0L 8NR-FTS turbo I4 1.6\u00a0L 1ZR-FE I4 ...``; we want the
+    smallest available displacement so that consumers can rely on it as the
+    base option for the model.
+    """
+    text = text.replace("\xa0", " ")
+    candidates: list[float] = []
+    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*([Ll]|cc|cm\u00b3|\u0441\u043c\u00b3)\b", text):
+        try:
+            v = float(m.group(1))
+        except ValueError:
+            continue
+        unit = m.group(2)
+        cc = v * 1000 if unit.lower() == "l" or unit == "\u043b" else v
+        if 50 < cc < 20000:
+            candidates.append(round(cc, 1))
+    return min(candidates) if candidates else None
+
+
+def _smallest_power_w(text: str) -> float | None:
+    text = text.replace("\xa0", " ")
+    candidates: list[float] = []
+    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*(kW|hp|PS|bhp|\u043a\u0412\u0442|\u043b\.?\s*\u0441\.?)", text, re.IGNORECASE):
+        try:
+            v = float(m.group(1))
+        except ValueError:
+            continue
+        unit = m.group(2).lower().replace(".", "").replace(" ", "")
+        if unit in ("kw", "\u043a\u0432\u0442"):
+            w = v * 1000
+        elif unit in ("hp", "bhp", "\u043b\u0441"):
+            w = v * 745.7
+        elif unit == "ps":
+            w = v * 735.5
+        else:
+            continue
+        if 1_000 < w < 5_000_000:
+            candidates.append(round(w, 1))
+    return min(candidates) if candidates else None
+
+
 def parse_infobox(html: str) -> dict:
     """Return a dict of normalized fields parsed from the page infobox."""
     soup = BeautifulSoup(html, "lxml")
@@ -544,7 +614,7 @@ def parse_infobox(html: str) -> dict:
         td = row.find("td")
         if not th or not td:
             continue
-        header = th.get_text(" ", strip=True).lower().strip().rstrip(":").rstrip("·")
+        header = th.get_text(" ", strip=True).lower().strip().rstrip(":").rstrip("\u00b7")
         # Some infoboxes group dimensions inside a nested table.
         nested = td.find("table")
         if nested:
@@ -568,6 +638,11 @@ def parse_infobox(html: str) -> dict:
             v = _first_match(_KG_RE, text, _to_kg)
             if v and 100 < v < 50000:
                 out[k] = round(v, 1)
+            else:
+                # Fallback: bare number in mass cell (common in RU/DE infoboxes)
+                v = _bare_kg(text)
+                if v:
+                    out[k] = round(v, 1)
         elif k == "power_w":
             v = _first_match(_KW_RE, text, _to_w)
             if v and 1000 < v < 5_000_000:
@@ -588,6 +663,57 @@ def parse_infobox(html: str) -> dict:
             cleaned = re.sub(r"\s+", " ", cleaned)
             if cleaned:
                 out[k] = cleaned[:300]
+
+    # ---- compound-cell fallbacks ----
+    # Doors hidden inside body_style like "5-door SUV".
+    if "doors" not in out:
+        body = raw.get("body_style") or out.get("body_style") or ""
+        m = _BODY_DOORS_RE.search(body)
+        if m:
+            try:
+                out["doors"] = int(m.group(1))
+            except ValueError:
+                pass
+
+    # Displacement/power buried inside the Engine cell.
+    engine_text = raw.get("engine") or ""
+    if "engine_displacement_cc" not in out and engine_text:
+        v = _smallest_displacement(engine_text)
+        if v:
+            out["engine_displacement_cc"] = v
+    if "power_w" not in out and engine_text:
+        v = _smallest_power_w(engine_text)
+        if v:
+            out["power_w"] = v
+
+    # Fuel type guess from engine/powertrain cell.
+    if "fuel_type" not in out:
+        for src_key in ("engine", "drive_type"):
+            t = raw.get(src_key) or ""
+            m = _FUEL_GUESS.search(t)
+            if m:
+                tok = m.group(1).lower()
+                mapping = {
+                    "petrol": "Petrol",
+                    "gasoline": "Petrol",
+                    "diesel": "Diesel",
+                    "hybrid": "Hybrid",
+                    "electric": "Electric",
+                    "hydrogen": "Hydrogen",
+                    "ethanol": "Ethanol",
+                    "cng": "CNG",
+                    "lpg": "LPG",
+                    "lng": "LNG",
+                    "\u0431\u0435\u043d\u0437\u0438\u043d": "Petrol",
+                    "\u0434\u0438\u0437\u0435\u043b\u044c": "Diesel",
+                }
+                # Cyrillic prefixes are matched by their stem; collapse all
+                # "\u044d\u043b\u0435\u043a\u0442\u0440..." hits to Electric.
+                if tok.startswith("\u044d\u043b\u0435\u043a\u0442\u0440"):
+                    out["fuel_type"] = "Electric"
+                else:
+                    out["fuel_type"] = mapping.get(tok, tok.capitalize())
+                break
     return out
 
 
@@ -599,6 +725,115 @@ def fetch_wikipedia(url: str, session: requests.Session) -> str | None:
     except requests.RequestException as e:
         log.debug("wp fetch failed for %s: %r", url, e)
     return None
+
+
+# ---------------------------------------------------------------------------
+# Wikipedia search-by-label (for rows where Wikidata had no sitelink)
+# ---------------------------------------------------------------------------
+
+# Languages we'll try, in order. EN/RU/DE first (best for cars), then a long
+# tail of large Wikipedias that frequently host car articles missing in EN.
+SEARCH_LANGS = ("en", "ru", "de", "fr", "it", "es", "pt", "ja", "zh", "pl")
+
+
+def wikipedia_search(
+    session: requests.Session, label: str, manufacturer: str | None
+) -> str | None:
+    """Return a Wikipedia article URL whose title plausibly matches the label.
+
+    Strategy: probe each language's MediaWiki ``opensearch`` API; accept the
+    first hit whose normalised title contains the model label. If a
+    manufacturer is known, require it (or its first word) to appear in the
+    matched title to filter out random homonyms.
+    """
+    label_clean = (label or "").strip()
+    if not label_clean:
+        return None
+    # Avoid double-prefixing: many Wikidata labels already include the
+    # manufacturer (e.g. "Mazda RX-5" with manufacturer="Mazda").
+    if manufacturer and label_clean.lower().startswith(manufacturer.lower() + " "):
+        query = label_clean
+    elif manufacturer:
+        query = f"{manufacturer} {label_clean}"
+    else:
+        query = label_clean
+    label_norm = re.sub(r"\W+", "", label_clean.lower())
+    manuf_token = (manufacturer or "").split()[0].lower() if manufacturer else ""
+
+    for lang in SEARCH_LANGS:
+        api = f"https://{lang}.wikipedia.org/w/api.php"
+        try:
+            r = session.get(
+                api,
+                params={
+                    "action": "opensearch",
+                    "search": query,
+                    "limit": 5,
+                    "namespace": 0,
+                    "format": "json",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=20,
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json()
+        except (requests.RequestException, ValueError) as e:
+            log.debug("opensearch %s failed: %r", lang, e)
+            continue
+        if not (isinstance(data, list) and len(data) >= 4):
+            continue
+        titles, urls = data[1], data[3]
+        for title, url in zip(titles, urls):
+            tnorm = re.sub(r"\W+", "", title.lower())
+            if label_norm and label_norm in tnorm:
+                if manuf_token and manuf_token not in tnorm and lang == "en":
+                    # English titles usually carry the brand; skip ambiguous hits.
+                    continue
+                return url
+    return None
+
+
+def find_missing_wikipedia(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 0,
+    delay: float = 0.1,
+) -> int:
+    """Locate Wikipedia URLs for rows that have none, via the search API.
+
+    Returns the number of rows that gained a wikipedia_url. The new URLs
+    flow into the regular enrichment step on the next pass.
+    """
+    rows = conn.execute(
+        """
+        SELECT qid, label, manufacturer
+        FROM cars
+        WHERE (wikipedia_url IS NULL OR wikipedia_url = '')
+          AND label IS NOT NULL AND label != ''
+        ORDER BY qid
+        """
+    ).fetchall()
+    if limit:
+        rows = rows[:limit]
+
+    log.info("wikipedia search: %d candidates", len(rows))
+    session = requests.Session()
+    found = 0
+    for qid, label, manuf in tqdm(rows, desc="WP search"):
+        url = wikipedia_search(session, label, manuf)
+        if url:
+            conn.execute(
+                "UPDATE cars SET wikipedia_url=?, updated_at=datetime('now') WHERE qid=?",
+                (url, qid),
+            )
+            found += 1
+            if found % 200 == 0:
+                conn.commit()
+        time.sleep(delay)
+    conn.commit()
+    log.info("wikipedia search: %d new URLs", found)
+    return found
 
 
 _ENRICH_FIELDS = (
@@ -732,6 +967,16 @@ def main() -> int:
         action="store_true",
         help="re-enrich every row, not only those with missing dims",
     )
+    ap.add_argument(
+        "--find-missing-wp",
+        action="store_true",
+        help="search Wikipedia by label for rows that have no wikipedia_url",
+    )
+    ap.add_argument(
+        "--autodata",
+        action="store_true",
+        help="run auto-data.net crawl after Wikipedia enrichment",
+    )
     args = ap.parse_args()
 
     db_path = Path(args.db)
@@ -769,10 +1014,24 @@ def main() -> int:
         rebuild_fts(conn)
         set_meta(conn, "total_models", str(total_written))
 
+    if args.find_missing_wp:
+        log.info("3.5/4 searching Wikipedia for rows missing a wikipedia_url...")
+        find_missing_wikipedia(conn, limit=args.limit)
+
     if not args.no_enrich:
         log.info("4/4 enriching from Wikipedia infoboxes...")
         enrich_from_wikipedia(conn, limit=args.limit, only_missing=not args.enrich_all)
         rebuild_fts(conn)
+
+    if args.autodata:
+        log.info("5/5 enriching from auto-data.net...")
+        try:
+            from enrich_autodata import crawl as _autodata_crawl
+
+            _autodata_crawl(db_path, brand_limit=0, model_limit=0)
+            rebuild_fts(conn)
+        except Exception as e:  # pragma: no cover
+            log.warning("auto-data.net pass failed: %r", e)
 
     set_meta(
         conn,
