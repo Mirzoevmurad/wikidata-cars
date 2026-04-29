@@ -380,7 +380,8 @@ def _match(idx: dict[str, ExistingRow], brand: str, model: str) -> ExistingRow |
 def upsert(conn: sqlite3.Connection, qid: str, brand: str, model: str, specs: dict, url: str) -> bool:
     """Upsert specs onto a row. Returns True if anything changed."""
     existing = conn.execute(
-        f"SELECT label, manufacturer, {', '.join(_FILLABLE)} FROM cars WHERE qid=?", (qid,)
+        f"SELECT label, manufacturer, source_specs, {', '.join(_FILLABLE)} FROM cars WHERE qid=?",
+        (qid,),
     ).fetchone()
 
     if existing is None:
@@ -396,7 +397,7 @@ def upsert(conn: sqlite3.Connection, qid: str, brand: str, model: str, specs: di
         )
         return True
 
-    label, _manuf, *cur_vals = existing
+    label, _manuf, cur_source_specs, *cur_vals = existing
     cur = dict(zip(_FILLABLE, cur_vals))
     sets: list[str] = ["autodata_url=?"]
     params: list = [url]
@@ -410,7 +411,11 @@ def upsert(conn: sqlite3.Connection, qid: str, brand: str, model: str, specs: di
             src_marks.append(f)
     if len(sets) > 1:
         sets.append("source_specs = COALESCE(NULLIF(source_specs,''),'') || ? ")
-        params.append(("," if cur.get("source_specs") else "") + "auto-data:" + ",".join(src_marks))
+        params.append(
+            ("," if cur_source_specs else "")
+            + "auto-data:"
+            + ",".join(src_marks)
+        )
         sets.append("updated_at=datetime('now')")
         params.append(qid)
         conn.execute(f"UPDATE cars SET {', '.join(sets)} WHERE qid=?", params)
@@ -534,8 +539,16 @@ def crawl(
     db_lock = threading.Lock()
 
     log.info("crawling trims (workers=%d)...", workers)
+
+    def _trim_worker(t: ModelTask) -> ModelResult | None:
+        # Resolve the per-thread Session inside the worker so each thread gets
+        # its own connection pool. Calling _session() in the main thread when
+        # building futures would share a single Session across all workers,
+        # which is not safe for concurrent requests.
+        return _process_model(_session(), t)
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_process_model, _session(), t) for t in tasks]
+        futures = [pool.submit(_trim_worker, t) for t in tasks]
         for fut in tqdm(futures, desc="trims", total=len(futures)):
             try:
                 result = fut.result()
