@@ -43,7 +43,9 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 
 
 _CORP_SUFFIX_RE = re.compile(
-    r"[,]?\s*"
+    # Require an actual separator (',' or whitespace) before the suffix so
+    # 'Iveco' isn't trimmed to 'Ive' (the trailing 'co' would otherwise match).
+    r"(?:[,]\s*|\s+)"
     r"(?:motor company|motor corporation|motor corp|motors|motor|"
     r"corporation|company|holdings|holding|group|automobile|automotive|"
     r"vehicles|cars|inc|incorporated|llc|ltd|limited|plc|corp|co|"
