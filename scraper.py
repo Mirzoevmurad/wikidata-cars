@@ -989,18 +989,6 @@ def main() -> int:
              "(needs a Russian IP / proxy \u2014 from outside RU you will "
              "hit Yandex SmartCaptcha and get zero rows).",
     )
-    ap.add_argument(
-        "--naavtotrasse",
-        action="store_true",
-        help="run naavtotrasse.ru catalog crawl after Wikipedia enrichment "
-             "(also populates the generations timeline table).",
-    )
-    ap.add_argument(
-        "--chinamobil",
-        action="store_true",
-        help="run chinamobil.ru catalog crawl after Wikipedia enrichment "
-             "(image / engine / generation years for Chinese makes).",
-    )
     args = ap.parse_args()
 
     db_path = Path(args.db)
@@ -1076,26 +1064,6 @@ def main() -> int:
             rebuild_fts(conn)
         except Exception as e:  # pragma: no cover
             log.warning("auto.ru pass failed: %r", e)
-
-    if args.naavtotrasse:
-        log.info("8/N enriching from naavtotrasse.ru...")
-        try:
-            from enrich_naavtotrasse import crawl as _naa_crawl
-
-            _naa_crawl(db_path, brand_limit=0, model_limit=0)
-            rebuild_fts(conn)
-        except Exception as e:  # pragma: no cover
-            log.warning("naavtotrasse pass failed: %r", e)
-
-    if args.chinamobil:
-        log.info("9/N enriching from chinamobil.ru...")
-        try:
-            from enrich_chinamobil import crawl as _cm_crawl
-
-            _cm_crawl(db_path, brand_limit=0, model_limit=0)
-            rebuild_fts(conn)
-        except Exception as e:  # pragma: no cover
-            log.warning("chinamobil pass failed: %r", e)
 
     set_meta(
         conn,
