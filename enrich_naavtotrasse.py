@@ -125,15 +125,20 @@ class Variant:
 def list_variants(session: requests.Session, model_url: str) -> list[Variant]:
     """Read the model page, find every /cat/.../<YYYY>_<id>/ link and parse the
     surrounding text 'MM.YYYY - MM.YYYY <id> <body>' to learn each variant's
-    timeline."""
+    timeline.
+
+    naavtotrasse renders each variant as a <figure> with two <a> tags pointing
+    at the same URL: the first wraps an <img> (no year text), the second is
+    inside a <figcaption> and carries the year/body label. We dedupe on href
+    but only after we've seen a match with the year text, so we don't drop
+    the only useful one.
+    """
     html = fetch(session, model_url) or ""
-    out: list[Variant] = []
-    seen: set[str] = set()
+    by_href: dict[str, Variant] = {}
     for m in _VARIANT_LINK_RE.finditer(html):
         href, _yr, pid_s, inner = m.groups()
-        if href in seen:
-            continue
-        seen.add(href)
+        if href in by_href:
+            continue  # already have a parsed (with-year) variant for this URL
         text = re.sub(r"<[^>]+>", " ", inner)
         text = re.sub(r"\s+", " ", text).strip()
         # naavtotrasse occasionally types '010' as a typo for '10', so we
@@ -156,16 +161,14 @@ def list_variants(session: requests.Session, model_url: str) -> list[Variant]:
             re.I,
         )
         body = body_match.group(1) if body_match else ""
-        out.append(
-            Variant(
-                url=BASE + href,
-                year_start=year_start,
-                year_end=year_end,
-                body=body,
-                page_id=int(pid_s),
-            )
+        by_href[href] = Variant(
+            url=BASE + href,
+            year_start=year_start,
+            year_end=year_end,
+            body=body,
+            page_id=int(pid_s),
         )
-    return out
+    return list(by_href.values())
 
 
 # ---------------------------------------------------------------------------
