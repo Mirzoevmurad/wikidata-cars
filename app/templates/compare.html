@@ -14,46 +14,6 @@
     </div>
 {% else %}
 
-{% if has_any_generations %}
-{# Timeline of generations. Each row is one model; each bar is a generation,
-   positioned as a percentage of the shared (timeline_lo .. timeline_hi)
-   interval so multiple models share an aligned axis. #}
-{% set span = (timeline_hi - timeline_lo) if (timeline_hi > timeline_lo) else 1 %}
-<section class="timeline">
-    <div class="timeline-head">
-        <h2>История поколений</h2>
-        <span class="timeline-axis">{{ timeline_lo }} — {{ timeline_hi }}</span>
-    </div>
-    {% for m in models %}
-        {% set gens = generations.get(m.qid) or [] %}
-        <div class="timeline-row">
-            <div class="timeline-label">{{ m.display_name or m.label or m.qid }}</div>
-            <div class="timeline-track">
-                {% if gens %}
-                    {% for g in gens %}
-                        {% set ys = g.year_start or timeline_lo %}
-                        {% set ye = g.year_end or timeline_hi %}
-                        {% set left = ((ys - timeline_lo) / span * 100) %}
-                        {% set width = ((ye - ys) / span * 100) %}
-                        {% if width < 1.5 %}{% set width = 1.5 %}{% endif %}
-                        <a class="timeline-bar{% if g.year_end is none %} is-current{% endif %}"
-                           href="{{ g.source_url }}" target="_blank" rel="noopener"
-                           style="left: {{ '%.2f' % left }}%; width: {{ '%.2f' % width }}%;"
-                           title="{{ ys }}{% if g.year_end %}–{{ g.year_end }}{% else %}–н.в.{% endif %}{% if g.body_style %} · {{ g.body_style }}{% endif %} · {{ g.source }}">
-                            <span class="timeline-bar-text">
-                                {{ ys }}{% if g.year_end %}–{{ (g.year_end|string)[-2:] }}{% else %}–н.в.{% endif %}{% if g.body_style %} {{ g.body_style }}{% endif %}
-                            </span>
-                        </a>
-                    {% endfor %}
-                {% else %}
-                    <span class="timeline-empty">данных по поколениям нет</span>
-                {% endif %}
-            </div>
-        </div>
-    {% endfor %}
-</section>
-{% endif %}
-
 {# Macro: render a row of cells (one per model) for a given key & formatter. #}
 {% macro cells(key, models, fmt='', unit='') -%}
     {% for m in models %}

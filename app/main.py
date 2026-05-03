@@ -241,68 +241,6 @@ def api_model(qid: str) -> dict[str, Any]:
         conn.close()
 
 
-def _fetch_generations(conn: sqlite3.Connection, qids: list[str]) -> dict[str, list[dict[str, Any]]]:
-    """Return {qid: [generation, …]} for the given qids. Each generation has
-    year_start / year_end / body_style / source / source_url. The
-    ``generations`` table is created lazily by the enrichment scrapers, so we
-    tolerate it not existing yet."""
-    out: dict[str, list[dict[str, Any]]] = {q: [] for q in qids}
-    if not qids:
-        return out
-    try:
-        placeholders = ",".join("?" for _ in qids)
-        rows = conn.execute(
-            f"""SELECT qid, gen_index, year_start, year_end, body_style,
-                       source, source_url
-                FROM generations
-                WHERE qid IN ({placeholders})
-                ORDER BY qid, year_start, gen_index""",
-            qids,
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return out
-    # Dedupe by (qid, year_start, year_end, body_style) — naavtotrasse and
-    # chinamobil sometimes overlap.
-    seen: dict[tuple[str, int | None, int | None, str], dict[str, Any]] = {}
-    for r in rows:
-        key = (r["qid"], r["year_start"], r["year_end"], r["body_style"] or "")
-        if key in seen:
-            continue
-        seen[key] = {
-            "qid": r["qid"],
-            "gen_index": r["gen_index"],
-            "year_start": r["year_start"],
-            "year_end": r["year_end"],
-            "body_style": r["body_style"],
-            "source": r["source"],
-            "source_url": r["source_url"],
-        }
-    for d in seen.values():
-        out.setdefault(d["qid"], []).append(d)
-    for q in out:
-        out[q].sort(
-            key=lambda g: (
-                g["year_start"] or 0,
-                # "present" (year_end NULL) ranks higher than a fixed end year
-                1 if g["year_end"] is None else 0,
-                g["year_end"] or 0,
-            )
-        )
-    return out
-
-
-@app.get("/api/generations")
-def api_generations(qids: str = Query(..., description="comma-separated QIDs")) -> dict[str, Any]:
-    ids = [x.strip() for x in qids.split(",") if x.strip()]
-    if not ids:
-        raise HTTPException(status_code=400, detail="empty qids")
-    conn = get_conn()
-    try:
-        return {"generations": _fetch_generations(conn, ids)}
-    finally:
-        conn.close()
-
-
 @app.get("/api/compare")
 def api_compare(qids: str = Query(..., description="comma-separated QIDs")) -> dict[str, Any]:
     ids = [x.strip() for x in qids.split(",") if x.strip()]
@@ -377,37 +315,10 @@ def export_csv() -> StreamingResponse:
     )
 
 
-def _timeline_bounds(gens_by_qid: dict[str, list[dict[str, Any]]]) -> tuple[int, int]:
-    """Pick the (min year_start, max year_end-or-current) across all generations
-    so the per-model timeline bars share the same time axis."""
-    starts = []
-    ends = []
-    import datetime as _dt
-    current = _dt.datetime.utcnow().year
-    for gens in gens_by_qid.values():
-        for g in gens:
-            if g.get("year_start"):
-                starts.append(int(g["year_start"]))
-            if g.get("year_end"):
-                ends.append(int(g["year_end"]))
-            else:
-                ends.append(current)
-    if not starts or not ends:
-        return current, current
-    lo = min(starts)
-    hi = max(ends)
-    if hi <= lo:
-        hi = lo + 1
-    return lo, hi
-
-
 @app.get("/compare", response_class=HTMLResponse)
 def compare_page(request: Request, qids: str = "") -> HTMLResponse:
     ids = [x.strip() for x in qids.split(",") if x.strip()]
     models: list[dict[str, Any]] = []
-    generations: dict[str, list[dict[str, Any]]] = {}
-    timeline_lo = timeline_hi = 0
-    has_any_generations = False
     if ids:
         conn = get_conn()
         try:
@@ -420,23 +331,12 @@ def compare_page(request: Request, qids: str = "") -> HTMLResponse:
                 by_qid.get(q, {"qid": q, "label": "(not found)", "display_name": "(not found)"})
                 for q in ids
             ]
-            generations = _fetch_generations(conn, ids)
-            has_any_generations = any(generations.get(q) for q in ids)
-            if has_any_generations:
-                timeline_lo, timeline_hi = _timeline_bounds(generations)
         finally:
             conn.close()
     return templates.TemplateResponse(
         request,
         "compare.html",
-        {
-            "models": models,
-            "qids_raw": qids,
-            "generations": generations,
-            "has_any_generations": has_any_generations,
-            "timeline_lo": timeline_lo,
-            "timeline_hi": timeline_hi,
-        },
+        {"models": models, "qids_raw": qids},
     )
 
 
