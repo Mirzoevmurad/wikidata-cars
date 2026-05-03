@@ -389,11 +389,9 @@ def _process_model(session: requests.Session, t: ModelTask) -> ModelResult | Non
     variants = list_variants(session, t.model_url)
     if not variants:
         return None
-    # Pick the most recent variant (greatest year_start, "present" wins).
-    # Note: 'present' (year_end is None) must rank higher than an ended
-    # variant with the same start year so max() picks it — hence 1 vs 0.
+    # Pick the most recent variant (greatest year_start, "present" wins)
     def _key(v: Variant):
-        return (v.year_start, 1 if v.year_end is None else 0, v.year_end or 0)
+        return (v.year_start, 0 if v.year_end is None else 1, v.year_end or 0)
     latest = max(variants, key=_key)
     html = fetch(session, latest.url)
     specs = {}
@@ -479,15 +477,11 @@ def _store_generations(
             seen[key] = v
     ordered = sorted(
         seen.values(),
-        key=lambda v: (v.year_start, 1 if v.year_end is None else 0, v.year_end or 0),
+        key=lambda v: (v.year_start, 0 if v.year_end is None else 1, v.year_end or 0),
     )
     n = 0
     for i, v in enumerate(ordered, start=1):
         try:
-            # conn.total_changes is cumulative for the connection, so we
-            # diff before/after the INSERT OR IGNORE to know whether the
-            # row was actually inserted or silently dropped on UNIQUE.
-            before = conn.total_changes
             conn.execute(
                 """
                 INSERT OR IGNORE INTO generations
@@ -498,7 +492,7 @@ def _store_generations(
                 (qid, i, v.year_start, v.year_end, v.body or None,
                  "naavtotrasse", v.url),
             )
-            n += conn.total_changes - before
+            n += conn.total_changes and 1 or 0
         except sqlite3.Error as e:
             log.debug("gen insert %r: %r", v.url, e)
     return n
@@ -582,7 +576,7 @@ def crawl(
                 qid = f"naavtotrasse:{result.task.brand_slug}-{result.task.model_slug}"
             latest_url = max(
                 result.variants,
-                key=lambda v: (v.year_start, 1 if v.year_end is None else 0, v.year_end or 0),
+                key=lambda v: (v.year_start, 0 if v.year_end is None else 1, v.year_end or 0),
             ).url
             with db_lock:
                 try:

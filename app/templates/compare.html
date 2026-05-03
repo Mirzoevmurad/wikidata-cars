@@ -41,7 +41,7 @@
                            style="left: {{ '%.2f' % left }}%; width: {{ '%.2f' % width }}%;"
                            title="{{ ys }}{% if g.year_end %}–{{ g.year_end }}{% else %}–н.в.{% endif %}{% if g.body_style %} · {{ g.body_style }}{% endif %} · {{ g.source }}">
                             <span class="timeline-bar-text">
-                                {{ ys }}{% if g.year_end %}–{{ (g.year_end|string)[-2:] }}{% else %}–н.в.{% endif %}{% if g.body_style %} {{ g.body_style }}{% endif %}
+                                {{ ys }}{% if g.year_end %}–{{ g.year_end|string|truncate(2,end='') }}{% else %}–н.в.{% endif %}{% if g.body_style %} {{ g.body_style }}{% endif %}
                             </span>
                         </a>
                     {% endfor %}

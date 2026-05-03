@@ -338,10 +338,6 @@ def _store_generations(
     n = 0
     for i, (year, url) in enumerate(ordered, start=1):
         try:
-            # conn.total_changes is cumulative for the connection, so we
-            # diff before/after the INSERT OR IGNORE to know whether the
-            # row was actually inserted or silently dropped on UNIQUE.
-            before = conn.total_changes
             conn.execute(
                 """
                 INSERT OR IGNORE INTO generations
@@ -351,7 +347,7 @@ def _store_generations(
                 """,
                 (qid, i, year, "chinamobil", url),
             )
-            n += conn.total_changes - before
+            n += conn.total_changes and 1 or 0
         except sqlite3.Error:
             pass
     return n
